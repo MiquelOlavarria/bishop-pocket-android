@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
@@ -153,10 +154,25 @@ class MainActivity : AppCompatActivity() {
                 val req = Request.Builder().url(url).post(body).build()
                 client.newCall(req).execute().use { resp ->
                     val respText = resp.body?.string() ?: ""
+                    var audioOk = false
+                    try {
+                        val wav = File(filesDir, "pocket-last.wav")
+                        if (wav.exists() && wav.length() > 44) {
+                            val aReq = Request.Builder()
+                                .url(PocketConfig.updatesUrl(this@MainActivity).trimEnd('/') + "/audio")
+                                .post(wav.readBytes().toRequestBody("application/octet-stream".toMediaType()))
+                                .build()
+                            audioOk = client.newCall(aReq).execute().use { it.isSuccessful }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("MainActivity", "audio upload: ${e.message}")
+                    }
                     runOnUiThread {
                         if (resp.isSuccessful) {
-                            prog.text = "✅ Logs enviados a Bishop (${respText})"
-                            appendFeed("📤 Logs enviados a Bishop correctamente")
+                            val wav = File(filesDir, "pocket-last.wav")
+                            val sizeKb = if (wav.exists()) wav.length() / 1024 else 0
+                            prog.text = "✅ Logs enviados a Bishop (${respText})" + if (audioOk) " + audio ${sizeKb}KB" else " (sin audio)"
+                            appendFeed("📤 Logs enviados a Bishop correctamente" + if (audioOk) " (con audio ${sizeKb}KB)" else "")
                         } else {
                             prog.text = "❌ Error enviando logs: HTTP ${resp.code} $respText"
                             appendFeed("❌ Error enviando logs (HTTP ${resp.code})")

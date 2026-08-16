@@ -64,6 +64,7 @@ class PocketService : Service() {
     private var noiseFloor = 0.002f
     private var voiceMs = 0L          // duración acumulada de voz real (rms >= umbral)
     private var voiceEnergy = 0.0     // suma de rms de chunks con voz
+    private val recBuffer = ArrayList<Short>()   // PCM del último mensaje (para enviar a Bishop)
     private var lastBeep = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -131,6 +132,7 @@ class PocketService : Service() {
             state = State.LISTENING
             messageStarted = false
             silenceSince = 0L
+            recBuffer.clear()
             stt.resetRecognizer()
             return
         }
@@ -146,8 +148,8 @@ class PocketService : Service() {
                 startForeground(NOTIF_ID, buildNotification(if (running) "Escuchando…" else "Inactivo"))
             }
             when (intent?.action) {
-                ACTION_TOGGLE -> if (running) stopListening() else startListening()
-                ACTION_STOP -> { stopListening(); stopSelf() }
+                ACTION_TOGGLE -> if (running) stopListening(announce = true) else startListening()
+                ACTION_STOP -> { stopListening(announce = true); stopSelf() }
                 ACTION_FORCE_SEND -> forceSend()
                 ACTION_INTERRUPT -> interruptProcessing()
                 else -> if (intent == null && !running) startListening()
@@ -170,14 +172,54 @@ class PocketService : Service() {
         scope.launch { captureLoop() }
     }
 
-    private fun stopListening() {
+    private fun stopListening(announce: Boolean = false) {
         running = false
+        saveLastWav()
         recorder?.release()
         recorder = null
         state = State.OFF
         updateNotification("Inactivo")
         broadcastState("⚡ Escucha desactivada")
+        if (announce) say("Dejo de escuchar.")
     }
+
+    /** Guarda el PCM del último mensaje como WAV (para el análisis de Bishop). */
+    private fun saveLastWav() {
+        try {
+            val data = recBuffer
+            if (data.isEmpty()) return
+            val f = File(filesDir, "pocket-last.wav")
+            f.outputStream().use { out ->
+                val byteRate = SAMPLE_RATE * 2
+                out.write("RIFF".toByteArray())
+                out.write(intLE(36 + data.size * 2))
+                out.write("WAVE".toByteArray())
+                out.write("fmt ".toByteArray())
+                out.write(intLE(16))
+                out.write(shortLE(1))
+                out.write(shortLE(1))
+                out.write(intLE(SAMPLE_RATE))
+                out.write(intLE(byteRate))
+                out.write(shortLE(2))
+                out.write(shortLE(16))
+                out.write("data".toByteArray())
+                out.write(intLE(data.size * 2))
+                val b = ByteArray(data.size * 2)
+                for (i in data.indices) {
+                    b[i * 2] = (data[i].toInt() and 0xFF).toByte()
+                    b[i * 2 + 1] = ((data[i].toInt() shr 8) and 0xFF).toByte()
+                }
+                out.write(b)
+            }
+            fileLog("WAV guardado: ${data.size * 2} bytes (${data.size / SAMPLE_RATE}s)")
+        } catch (e: Exception) {
+            Log.w(TAG, "saveLastWav: ${e.message}")
+        }
+    }
+
+    private fun intLE(v: Int): ByteArray = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte(), ((v shr 16) and 0xFF).toByte(), ((v shr 24) and 0xFF).toByte())
+
+    private fun shortLE(v: Int): ByteArray = byteArrayOf((v and 0xFF).toByte(), ((v shr 8) and 0xFF).toByte())
 
     private fun captureLoop() {
         if (!stt.ensureModel()) {
@@ -262,10 +304,12 @@ class PocketService : Service() {
                 messageStarted = true
                 voiceMs = 0L
                 voiceEnergy = 0.0
+                recBuffer.clear()
                 stt.resetRecognizer()
             }
             voiceMs += (CHUNK_SECONDS * 1000).toLong()
             voiceEnergy += rms
+            for (i in 0 until n) recBuffer.add(buf[i])
             stt.accept(buf, n)
         } else {
             if (!messageStarted) {
@@ -292,8 +336,10 @@ class PocketService : Service() {
                         state = State.LISTENING
                         messageStarted = false
                         silenceSince = 0L
+                        recBuffer.clear()
                         stt.resetRecognizer()
                     } else if (hasEndPhrase(text)) {
+                        saveLastWav()
                         postEvent("📤 Enviando a Bishop…")
                         state = State.PROCESSING
                         updateNotification("Procesando…")
@@ -304,6 +350,7 @@ class PocketService : Service() {
                         state = State.LISTENING
                         messageStarted = false
                         silenceSince = 0L
+                        recBuffer.clear()
                         stt.resetRecognizer()
                     }
                 }
