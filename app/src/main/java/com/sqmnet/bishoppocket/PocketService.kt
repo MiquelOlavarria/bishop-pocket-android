@@ -6,10 +6,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.MediaPlayer
 import android.media.ToneGenerator
 import android.media.session.MediaSession
 import android.os.Build
@@ -64,6 +67,8 @@ class PocketService : Service() {
     private var running = false
     private var processing = false
     private var listening = false
+    private var silencePlayer: MediaPlayer? = null
+    private var audioManager: AudioManager? = null
     private var silenceSince = 0L
     private var messageStarted = false
     private val noiseWindow = ArrayDeque<Float>()
@@ -215,6 +220,7 @@ class PocketService : Service() {
         state = State.LISTENING
         agcGain = 1.0f
         pendingText = ""
+        startSilencePlayer()
         fileLog("startListening: LISTENING (arrancando captura)")
         updateNotification("Escuchando…")
         say("Te escucho.")
@@ -225,6 +231,7 @@ class PocketService : Service() {
     private fun stopListening(announce: Boolean = false) {
         running = false
         saveLastWav()
+        stopSilencePlayer()
         recorder?.release()
         recorder = null
         state = State.OFF
@@ -547,6 +554,7 @@ class PocketService : Service() {
     }
 
     override fun onDestroy() {
+        stopSilencePlayer()
         running = false
         recorder?.release()
         recorder = null
@@ -554,5 +562,38 @@ class PocketService : Service() {
         tts.shutdown()
         mediaSession?.release()
         super.onDestroy()
+    }
+
+    /** Reproductor de silencio + foco de audio: convierte la app en "reproductor activo"
+     *  para que Android le entregue las media keys del auricular (X7). */
+    private fun startSilencePlayer() {
+        try {
+            audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioManager?.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+            val afd = resources.openRawResourceFd(R.raw.silence)
+            val mp = MediaPlayer()
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mp.isLooping = true
+            mp.setVolume(0f, 0f)
+            mp.prepare()
+            mp.start()
+            silencePlayer = mp
+            fileLog("🎵 reproductor de silencio activo — media keys capturadas")
+        } catch (e: Exception) {
+            Log.w(TAG, "silence player: ${e.message}")
+            fileLog("❌ silence player: ${e.message}")
+        }
+    }
+
+    private fun stopSilencePlayer() {
+        try {
+            silencePlayer?.stop()
+            silencePlayer?.release()
+            silencePlayer = null
+            audioManager?.abandonAudioFocus(null)
+        } catch (e: Exception) {
+            Log.w(TAG, "stop silence player: ${e.message}")
+        }
     }
 }
