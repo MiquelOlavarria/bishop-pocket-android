@@ -132,6 +132,7 @@ class PocketService : Service() {
                     interruptProcessing()
                 }
             })
+            setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS)
             isActive = true
         }
     }
