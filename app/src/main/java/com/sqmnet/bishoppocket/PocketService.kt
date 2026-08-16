@@ -65,6 +65,8 @@ class PocketService : Service() {
     private var voiceMs = 0L          // duración acumulada de voz real (rms >= umbral)
     private var voiceEnergy = 0.0     // suma de rms de chunks con voz
     private val recBuffer = ArrayList<Short>()   // PCM del último mensaje (para enviar a Bishop)
+    private var agcGain = 1.0f        // ganancia automática (micro BT HFP entrega señal débil)
+    private val agcTarget = 0.08f     // RMS objetivo tras AGC
     private var lastBeep = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -165,6 +167,7 @@ class PocketService : Service() {
         if (running) return
         running = true
         state = State.LISTENING
+        agcGain = 1.0f
         fileLog("startListening: LISTENING (arrancando captura)")
         updateNotification("Escuchando…")
         say("Te escucho.")
@@ -292,8 +295,20 @@ class PocketService : Service() {
     }
 
     private fun processChunk(buf: ShortArray, n: Int) {
+        // AGC: amplifica señal débil (micro BT HFP del X7) hasta un nivel sano para Vosk
+        var rawSum = 0.0
+        for (i in 0 until n) rawSum += buf[i].toDouble() * buf[i]
+        val rawRms = sqrt(rawSum / n) / 32768.0
+        if (rawRms > 0.0005) {
+            val desired = (agcTarget / rawRms).toFloat()
+            agcGain += (desired - agcGain) * 0.15f
+            agcGain = agcGain.coerceIn(1f, 12f)
+        }
+        val scaled = if (agcGain > 1.02f) ShortArray(n) {
+            (buf[it] * agcGain).toInt().coerceIn(-32768, 32767).toShort()
+        } else buf
         var sum = 0.0
-        for (i in 0 until n) sum += buf[i].toDouble() * buf[i]
+        for (i in 0 until n) sum += scaled[i].toDouble() * scaled[i]
         val rms = sqrt(sum / n) / 32768.0
         currentRms = rms.toFloat()
         val now = System.currentTimeMillis()
@@ -309,8 +324,8 @@ class PocketService : Service() {
             }
             voiceMs += (CHUNK_SECONDS * 1000).toLong()
             voiceEnergy += rms
-            for (i in 0 until n) recBuffer.add(buf[i])
-            stt.accept(buf, n)
+            for (i in 0 until n) recBuffer.add(scaled[i])
+            stt.accept(scaled, n)
         } else {
             if (!messageStarted) {
                 noiseWindow.addLast(rms.toFloat())
