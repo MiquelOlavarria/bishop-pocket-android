@@ -255,7 +255,7 @@ class PocketService : Service() {
         val rms = sqrt(sum / n) / 32768.0
         currentRms = rms.toFloat()
         val now = System.currentTimeMillis()
-        val threshold = maxOf(0.015f, noiseFloor * 2.5f)
+        val threshold = maxOf(0.010f, noiseFloor * 2.0f)
         if (rms >= threshold) {
             silenceSince = 0L
             if (!messageStarted) {
