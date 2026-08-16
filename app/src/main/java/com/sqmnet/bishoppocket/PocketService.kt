@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -133,6 +134,15 @@ class PocketService : Service() {
                 }
             })
             setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS)
+            // API 31+: reclamar los botones de medios dinámicamente (sin receiver estático
+            // en el manifest — evita el aviso de Play Protect y quita los botones a Spotify).
+            if (Build.VERSION.SDK_INT >= 31) {
+                try {
+                    setMediaButtonBroadcastReceiver(ComponentName(this@PocketService, MediaKeyReceiver::class.java))
+                } catch (e: Exception) {
+                    Log.w(TAG, "setMediaButtonBroadcastReceiver: ${e.message}")
+                }
+            }
             isActive = true
         }
     }
