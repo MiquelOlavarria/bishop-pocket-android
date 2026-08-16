@@ -62,6 +62,8 @@ class PocketService : Service() {
     private var messageStarted = false
     private val noiseWindow = ArrayDeque<Float>()
     private var noiseFloor = 0.002f
+    private var voiceMs = 0L          // duración acumulada de voz real (rms >= umbral)
+    private var voiceEnergy = 0.0     // suma de rms de chunks con voz
     private var lastBeep = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -108,7 +110,16 @@ class PocketService : Service() {
     }
 
     private fun forceSend() {
-        if (state == State.PROCESSING || state == State.VERIFYING || !messageStarted) return
+        if (state == State.PROCESSING || state == State.VERIFYING) {
+            postEvent("📨 Enviar ahora ignorado: procesando en curso")
+            say("Estoy procesando, un momento.")
+            return
+        }
+        if (!messageStarted) {
+            postEvent("📨 Enviar ahora ignorado: no hay mensaje en curso")
+            say("No tengo nada que enviar.")
+            return
+        }
         state = State.VERIFYING
         updateNotification("Enviando…")
         broadcastState("📨 Enviando ahora (forzado)")
@@ -249,8 +260,12 @@ class PocketService : Service() {
             silenceSince = 0L
             if (!messageStarted) {
                 messageStarted = true
+                voiceMs = 0L
+                voiceEnergy = 0.0
                 stt.resetRecognizer()
             }
+            voiceMs += (CHUNK_SECONDS * 1000).toLong()
+            voiceEnergy += rms
             stt.accept(buf, n)
         } else {
             if (!messageStarted) {
@@ -269,7 +284,10 @@ class PocketService : Service() {
                     val text = stt.finalText()
                     postEvent("🎙 $text")
                     val normWords = text.lowercase().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-                    val noiseOnly = normWords.size <= 2 && !hasEndPhrase(text)
+                    // voz REAL = energía sostenida (varios chunks por encima del umbral).
+                    // Las alucinaciones de Vosk con ruido no la tienen (el log: 0.023 vs 0.061).
+                    val voiceReal = voiceMs >= 700L
+                    val noiseOnly = !voiceReal && !hasEndPhrase(text)
                     if (text.isBlank() || noiseOnly) {
                         state = State.LISTENING
                         messageStarted = false
