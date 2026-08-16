@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="8dp">
+
+    <EditText
+        android:id="@+id/et_url"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="URL del agente (http://192.168.68.175:8642)" />
+
+    <EditText
+        android:id="@+id/et_key"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="API key (opcional)" />
+
+    <EditText
+        android:id="@+id/et_session"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Session ID" />
+</LinearLayout>

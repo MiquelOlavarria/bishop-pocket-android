@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="BISHOP POCKET"
+        android:textSize="22sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tv_state"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="○ APAGADO"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Bishop Pocket"
+            android:textStyle="bold"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/tv_version"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="v?"
+            android:textSize="12sp"
+            android:layout_gravity="center_vertical" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btn_toggle"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:text="▶ INICIAR CONVERSACIÓN"
+        android:textSize="18sp" />
+
+    <Button
+        android:id="@+id/btn_settings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="⚙ Ajustes (agente / Vosk)"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btn_download"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="⬇ Descargar modelo STT (40MB)"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btn_update"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔄 Buscar actualizaciones"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/tv_vu_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🎙 Nivel de entrada: —"
+        android:textSize="13sp" />
+
+    <ProgressBar
+        android:id="@+id/vu_meter"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="16dp"
+        android:max="1000"
+        android:progress="0" />
+
+    <Button
+        android:id="@+id/btn_send_now"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📨 Enviar ahora (sin silencio ni 'cambio')"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btn_interrupt"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="⚡ Interrumpir proceso (volver a escuchar)"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btn_send_logs"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📤 Enviar logs a Bishop"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/tv_progress"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="12sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="ACTIVIDAD EN VIVO"
+        android:textStyle="bold" />
+
+    <ScrollView
+        android:id="@+id/scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#111111"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/tv_feed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#E0E0E0"
+            android:textSize="12sp" />
+    </ScrollView>
+</LinearLayout>
