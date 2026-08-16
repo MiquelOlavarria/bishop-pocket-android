@@ -15,10 +15,14 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.KeyEvent
-import kotlin.math.sqrt
-import kotlinx.coroutines.*
 import java.io.File
 import java.util.Locale
+import kotlin.math.sqrt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /** Servicio de escucha walkie-talkie: micro → VAD → silencio → "cambio" → agente → TTS. */
 class PocketService : Service() {
@@ -35,10 +39,9 @@ class PocketService : Service() {
 
         const val SAMPLE_RATE = 16000
         const val CHUNK_SECONDS = 0.6f
-        private const val SILENCE_MS_DEFAULT = 5000L   // pausa que dispara verificación
 
         @Volatile
-        var currentRms = 0f        // nivel de entrada (0..1) para el VU meter de la UI
+        var currentRms = 0f
             private set
 
         @Volatile
@@ -53,15 +56,12 @@ class PocketService : Service() {
     private lateinit var tts: TtsEngine
     private lateinit var agent: AgentClient
     private var recorder: AudioRecord? = null
-    private var running = false
-    private var processing = false
     private var mediaSession: MediaSession? = null
-    private var listening = false
+    private var running = false
     private var silenceSince = 0L
     private var messageStarted = false
-    private val noiseWindow = ArrayDeque<Float>()   // rms de chunks sin voz
-    private var noiseFloor = 0.002f                 // ruido de fondo estimado
-    private var wakeupSaid = false
+    private val noiseWindow = ArrayDeque<Float>()
+    private var noiseFloor = 0.002f
     private var lastBeep = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -74,25 +74,24 @@ class PocketService : Service() {
         agent = AgentClient(this)
         try {
             startForeground(NOTIF_ID, buildNotification("Inactivo"))
-            postEvent("Servicio iniciado (onCreate)")
+            fileLog("Servicio iniciado (onCreate)")
         } catch (e: Exception) {
             Log.e(TAG, "onCreate/startForeground: ${e.message}")
-            fileLog("❌ onCreate error: ${e.javaClass.simpleName}: ${e.message}")
+            fileLog("onCreate error: ${e.javaClass.simpleName}: ${e.message}")
         }
         setupMediaSession()
     }
 
-    /** Captura los botones del auricular BT (media keys) para controlar la escucha. */
     private fun setupMediaSession() {
         mediaSession = MediaSession(this, "bishop-pocket").apply {
             setCallback(object : MediaSession.Callback() {
                 override fun onSkipToNext() {
-                    fileLog("🔘 Siguiente canción → interrumpir y volver a escuchar")
+                    fileLog("Botón siguiente → interrumpir y volver a escuchar")
                     interruptProcessing()
                 }
 
                 override fun onSkipToPrevious() {
-                    fileLog("🔘 Anterior canción → forzar envío")
+                    fileLog("Botón anterior → forzar envío")
                     forceSend()
                 }
             })
@@ -100,17 +99,14 @@ class PocketService : Service() {
         }
     }
 
-    /** Interrumpe el procesamiento y vuelve a escuchar (matiz/instrucción). */
     private fun interruptProcessing() {
         if (state != State.PROCESSING && state != State.VERIFYING) return
-        processing = false
         state = State.LISTENING
         updateNotification("Escuchando…")
         broadcastState("⚡ Interrumpido — vuelvo a escuchar")
         say("Dime.")
     }
 
-    /** Procesa el mensaje acumulado AHORA, sin esperar silencio ni palabra clave. */
     private fun forceSend() {
         if (state == State.PROCESSING || state == State.VERIFYING || !messageStarted) return
         state = State.VERIFYING
@@ -129,7 +125,7 @@ class PocketService : Service() {
         }
         state = State.PROCESSING
         updateNotification("Procesando…")
-        scope.launch { sendMessage(stripEndPhrase(text)) }
+        scope.launch { sendMessage(text) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -147,7 +143,7 @@ class PocketService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "onStartCommand: ${e.message}")
-            fileLog("❌ onStartCommand error: ${e.javaClass.simpleName}: ${e.message}")
+            fileLog("onStartCommand error: ${e.javaClass.simpleName}: ${e.message}")
         }
         return START_STICKY
     }
@@ -165,11 +161,9 @@ class PocketService : Service() {
 
     private fun stopListening() {
         running = false
-        listening = false
-        state = State.OFF
-        recorder?.stop()
         recorder?.release()
         recorder = null
+        state = State.OFF
         updateNotification("Inactivo")
         broadcastState("⚡ Escucha desactivada")
     }
@@ -182,15 +176,13 @@ class PocketService : Service() {
         }
         stt.resetRecognizer()
         fileLog("captureLoop: modelo OK, creando AudioRecord…")
-        val chunk = (SAMPLE_RATE * CHUNK_SECONDS).toInt()   // 16000 × 0.6 = 9600 muestras
-        // Buffer de captura >= mínimo del dispositivo (evita "Error al abrir el micrófono")
+        val chunk = (SAMPLE_RATE * CHUNK_SECONDS).toInt()   // 16000 × 0.6 = 9600
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val bufSize = maxOf(minBuf * 2, chunk * 2)
         val buf = ShortArray(chunk)
         recorder = try {
             AudioRecord(
-                // VOICE_RECOGNITION: AGC + supresión de ruido (ideal para STT, con o sin BT)
                 MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 bufSize
@@ -250,9 +242,8 @@ class PocketService : Service() {
         var sum = 0.0
         for (i in 0 until n) sum += buf[i].toDouble() * buf[i]
         val rms = sqrt(sum / n) / 32768.0
-        currentRms = rms.toFloat()   // para el VU meter de la UI
+        currentRms = rms.toFloat()
         val now = System.currentTimeMillis()
-        // umbral adaptativo: sube con el ruido de fondo real del entorno
         val threshold = maxOf(0.015f, noiseFloor * 2.5f)
         if (rms >= threshold) {
             silenceSince = 0L
@@ -262,50 +253,47 @@ class PocketService : Service() {
             }
             stt.accept(buf, n)
         } else {
-            // sin voz: alimentar la ventana de ruido (solo cuando no hay mensaje)
             if (!messageStarted) {
                 noiseWindow.addLast(rms.toFloat())
                 if (noiseWindow.size > 40) noiseWindow.removeFirst()
                 if (noiseWindow.size >= 15) {
                     val sorted = noiseWindow.sorted()
-                    noiseFloor = sorted[sorted.size * 6 / 10]  // percentil 60
+                    noiseFloor = sorted[sorted.size * 6 / 10]
                 }
             }
             if (messageStarted) {
                 if (silenceSince == 0L) silenceSince = now
                 else if (now - silenceSince >= PocketConfig.silenceMs(this)) {
-                // silencio → verificación con la palabra final
-                state = State.VERIFYING
-                updateNotification("Verificando…")
-                val text = stt.finalText()
-                postEvent("🎙 $text")
-                val normWords = text.lowercase().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
-                val noiseOnly = normWords.size <= 2 && !hasEndPhrase(text)   // Vosk alucina con ruido
-                if (text.isBlank() || noiseOnly) {
-                    // silencio o ruido sin contenido real: resetear en silencio
-                    state = State.LISTENING
-                    messageStarted = false
-                    silenceSince = 0L
-                    stt.resetRecognizer()
-                } else if (hasEndPhrase(text)) {
-                    postEvent("📤 Enviando a Bishop…")
-                    state = State.PROCESSING
-                    updateNotification("Procesando…")
-                    scope.launch { sendMessage(text) }
-                } else {
-                    postEvent("Sin \"${PocketConfig.endPhrase(this)}\" — sigo escuchando")
-                    say("Perdona, continúa.")
-                    state = State.LISTENING
-                    messageStarted = false
-                    silenceSince = 0L
-                    stt.resetRecognizer()
+                    state = State.VERIFYING
+                    updateNotification("Verificando…")
+                    val text = stt.finalText()
+                    postEvent("🎙 $text")
+                    val normWords = text.lowercase().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                    val noiseOnly = normWords.size <= 2 && !hasEndPhrase(text)
+                    if (text.isBlank() || noiseOnly) {
+                        state = State.LISTENING
+                        messageStarted = false
+                        silenceSince = 0L
+                        stt.resetRecognizer()
+                    } else if (hasEndPhrase(text)) {
+                        postEvent("📤 Enviando a Bishop…")
+                        state = State.PROCESSING
+                        updateNotification("Procesando…")
+                        scope.launch { sendMessage(text) }
+                    } else {
+                        postEvent("Sin \"${PocketConfig.endPhrase(this)}\" — sigo escuchando")
+                        say("Perdona, continúa.")
+                        state = State.LISTENING
+                        messageStarted = false
+                        silenceSince = 0L
+                        stt.resetRecognizer()
+                    }
                 }
             }
         }
     }
 
     private fun sendMessage(raw: String) {
-        processing = true
         try {
             val text = stripEndPhrase(raw)
             val reply = agent.chat(text)
@@ -319,22 +307,20 @@ class PocketService : Service() {
             }
             beep()
         } finally {
-            processing = false
+            state = State.LISTENING
+            messageStarted = false
+            silenceSince = 0L
+            stt.resetRecognizer()
+            updateNotification("Escuchando…")
         }
-        state = State.LISTENING
-        messageStarted = false
-        silenceSince = 0L
-        stt.resetRecognizer()
-        updateNotification("Escuchando…")
     }
 
-    /** La palabra fin solo vale como ÚLTIMA palabra exacta (respetando tildes). */
     private fun hasEndPhrase(text: String): Boolean {
         val phrase = PocketConfig.endPhrase(this)
         val norm = text.lowercase()
             .replace(Regex("[^a-záéíóúñü0-9 ]"), " ")
             .trim()
-        if (norm.isEmpty()) return false
+        if (norm.isBlank()) return false
         val words = norm.split(Regex("\\s+"))
         return words.last() == phrase
     }
@@ -344,19 +330,17 @@ class PocketService : Service() {
         val norm = text.lowercase().replace(Regex("[^a-záéíóúñü0-9 ]"), " ").trim()
         val words = norm.split(Regex("\\s+"))
         if (words.isNotEmpty() && words.last() == phrase) {
-            return text.replace(Regex("\\s*[,.;:!¡?¿-]*\\s*" + Regex.escape(phrase) + "[.,;:!¡?¿]*\\s*$"), "")
+            return text.trimEnd().removeSuffix(words.last().let { text.trimEnd().takeLast(it.length) })
+                .trimEnd(' ', ',', '.', ';', ':', '!', '¡', '?', '¿', '-')
         }
         return text
     }
 
     private fun cleanForTts(t: String): String {
-        return t.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
-            .replace(Regex("`([^`]*)`"), "$1")
-            .replace(Regex("^#{1,6}\\s*", RegexOption.MULTILINE), "")
-            .replace(Regex("\\n{2,}"), ". ")
-            .replace("\n", " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+        val noNormalized = t.replace(Regex("(?:⚠️|⚠)?\\s*Normalized model\\b.*?\\bfor\\s+[\\w.-]+\\.?\\s*", RegexOption.IGNORE_CASE), "")
+        val noBold = noNormalized.replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
+        val noCode = noBold.replace(Regex("`([^`]*)`"), "$1")
+        return noCode.replace(Regex("\\s+"), " ").trim()
     }
 
     private fun say(text: String) {
@@ -379,18 +363,17 @@ class PocketService : Service() {
         sendBroadcast(i)
     }
 
-    /** Log persistente en filesDir/pocket.log (para el botón "enviar logs"). */
     private fun fileLog(text: String) {
         try {
             val f = File(filesDir, "pocket.log")
-            val line = "[${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date())}] $text\n"
+            val ts = java.text.SimpleDateFormat("HH:mm:ss", Locale.US).format(java.util.Date())
+            val line = "[$ts] $text\n"
             f.appendText(line)
         } catch (e: Exception) {
             Log.w(TAG, "fileLog: ${e.message}")
         }
     }
 
-    /** Broadcast de estado (con texto opcional) — fuente de verdad para la UI. */
     private fun broadcastState(text: String? = null) {
         if (text != null) fileLog(text)
         val i = Intent(EXTRA_EVENT).setPackage(packageName)
@@ -400,8 +383,12 @@ class PocketService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIF_ID, buildNotification(text))
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIF_ID, buildNotification(text))
+        } catch (e: Exception) {
+            Log.w(TAG, "updateNotification: ${e.message}")
+        }
     }
 
     private fun buildNotification(text: String): Notification {
@@ -425,19 +412,17 @@ class PocketService : Service() {
     }
 
     private fun createChannel() {
-        val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) {
-            val ch = NotificationChannel(CHANNEL_ID, "Bishop Pocket", NotificationManager.IMPORTANCE_LOW)
-            nm.createNotificationChannel(ch)
-        }
+        val ch = NotificationChannel(CHANNEL_ID, "Bishop Pocket", NotificationManager.IMPORTANCE_LOW)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
     }
 
     override fun onDestroy() {
-        stopListening()
+        running = false
+        recorder?.release()
+        recorder = null
         scope.cancel()
         tts.shutdown()
+        mediaSession?.release()
         super.onDestroy()
     }
 }
-}
-
