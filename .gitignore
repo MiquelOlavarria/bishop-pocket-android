@@ -8,6 +8,10 @@ captures/
 .cxx/
 *.log
 
+# Firma (no exponer en repos públicos)
+*.keystore
+*.jks
+
 # IDE
 .idea/
 *.iml

@@ -7,6 +7,17 @@ android {
     namespace = "com.sqmnet.bishoppocket"
     compileSdk = 34
 
+    signingConfigs {
+        // Firma ESTABLE del proyecto: bishop-pocket.keystore (copia del debug original).
+        // Nunca usar el debug.keystore del sistema (se regenera y rompe las actualizaciones).
+        create("pocket") {
+            storeFile = rootProject.file("bishop-pocket.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.sqmnet.bishoppocket"
         minSdk = 26
@@ -16,6 +27,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("pocket")
+        }
         release {
             isMinifyEnabled = false
         }
