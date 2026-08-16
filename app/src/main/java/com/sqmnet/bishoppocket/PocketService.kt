@@ -64,6 +64,7 @@ class PocketService : Service() {
     private var noiseFloor = 0.002f
     private var voiceMs = 0L          // duración acumulada de voz real (rms >= umbral)
     private var voiceEnergy = 0.0     // suma de rms de chunks con voz
+    private var pendingText = ""      // texto acumulado entre "continúa" y el envío
     private val recBuffer = ArrayList<Short>()   // PCM del último mensaje (para enviar a Bishop)
     private var agcGain = 1.0f        // ganancia automática (micro BT HFP entrega señal débil)
     private val agcTarget = 0.08f     // RMS objetivo tras AGC
@@ -127,8 +128,9 @@ class PocketService : Service() {
         updateNotification("Enviando…")
         broadcastState("📨 Enviando ahora (forzado)")
         val text = stt.finalText()
-        postEvent("🎙 $text")
-        if (text.isBlank()) {
+        val full = (pendingText + " " + text).trim()
+        postEvent("🎙 $full")
+        if (full.isBlank()) {
             postEvent("Sin contenido para enviar")
             say("No te he oído nada.")
             state = State.LISTENING
@@ -138,9 +140,10 @@ class PocketService : Service() {
             stt.resetRecognizer()
             return
         }
+        pendingText = ""
         state = State.PROCESSING
         updateNotification("Procesando…")
-        scope.launch { sendMessage(text) }
+        scope.launch { sendMessage(stripEndPhrase(full)) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -168,6 +171,7 @@ class PocketService : Service() {
         running = true
         state = State.LISTENING
         agcGain = 1.0f
+        pendingText = ""
         fileLog("startListening: LISTENING (arrancando captura)")
         updateNotification("Escuchando…")
         say("Te escucho.")
@@ -341,31 +345,34 @@ class PocketService : Service() {
                     state = State.VERIFYING
                     updateNotification("Verificando…")
                     val text = stt.finalText()
-                    postEvent("🎙 $text")
-                    val normWords = text.lowercase().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                    val full = (pendingText + " " + text).trim()
+                    postEvent("🎙 $full")
+                    val normWords = full.lowercase().trim().split(Regex("\\s+")).filter { it.isNotBlank() }
                     // voz REAL = energía sostenida (varios chunks por encima del umbral).
                     // Las alucinaciones de Vosk con ruido no la tienen (el log: 0.023 vs 0.061).
                     val voiceReal = voiceMs >= 700L
-                    val noiseOnly = !voiceReal && !hasEndPhrase(text)
-                    if (text.isBlank() || noiseOnly) {
+                    val noiseOnly = !voiceReal && !hasEndPhrase(full)
+                    if (full.isBlank() || noiseOnly) {
+                        // silencio total o ruido: resetear en silencio (sin descartar pendiente previo)
                         state = State.LISTENING
                         messageStarted = false
                         silenceSince = 0L
-                        recBuffer.clear()
                         stt.resetRecognizer()
-                    } else if (hasEndPhrase(text)) {
+                    } else if (hasEndPhrase(full)) {
                         saveLastWav()
                         postEvent("📤 Enviando a Bishop…")
                         state = State.PROCESSING
                         updateNotification("Procesando…")
-                        scope.launch { sendMessage(text) }
+                        pendingText = ""
+                        scope.launch { sendMessage(full) }
                     } else {
+                        // sin "cambio": ACUMULAR lo dicho y seguir escuchando (no descartar)
                         postEvent("Sin \"${PocketConfig.endPhrase(this)}\" — sigo escuchando")
                         say("Perdona, continúa.")
+                        pendingText = full
                         state = State.LISTENING
                         messageStarted = false
                         silenceSince = 0L
-                        recBuffer.clear()
                         stt.resetRecognizer()
                     }
                 }
