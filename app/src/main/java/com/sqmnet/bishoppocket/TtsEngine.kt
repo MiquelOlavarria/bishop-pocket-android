@@ -26,9 +26,15 @@ class TtsEngine(ctx: Context) {
         }
     }
 
-    /** Lee el texto en voz alta (bloqueante hasta terminar). */
+    /** Lee el texto en voz alta (bloqueante hasta terminar). Espera a que el TTS esté listo. */
     suspend fun speak(text: String) = withContext(Dispatchers.Main) {
         val t = tts ?: return@withContext
+        // esperar a que el motor esté listo (init asíncrono), máx 3s
+        var waited = 0
+        while (!ready && waited < 3000) {
+            kotlinx.coroutines.delay(100)
+            waited += 100
+        }
         if (!ready) return@withContext
         t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "pocket")
         // esperar a que termine para no solapar
