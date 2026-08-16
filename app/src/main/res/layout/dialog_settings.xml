@@ -22,4 +22,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Session ID" />
+
+    <EditText
+        android:id="@+id/et_floor"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Sensibilidad (0.008-0.030; 0.015 normal, menor = capta más)" />
 </LinearLayout>

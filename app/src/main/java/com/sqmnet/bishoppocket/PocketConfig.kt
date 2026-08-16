@@ -24,6 +24,13 @@ object PocketConfig {
 
     fun silenceMs(ctx: Context): Long = (silenceSeconds(ctx) * 1000).toLong()
 
+    /** Sensibilidad: piso mínimo del umbral de voz y margen sobre el ruido de fondo. */
+    fun voiceFloor(ctx: Context): Float = prefs(ctx).getFloat("voice_floor", 0.015f)
+
+    fun setVoiceFloor(ctx: Context, v: Float) = prefs(ctx).edit().putFloat("voice_floor", v).apply()
+
+    fun voiceMargin(ctx: Context): Float = prefs(ctx).getFloat("voice_margin", 2.5f)
+
     fun voskModelUrl(ctx: Context): String =
         prefs(ctx).getString("vosk_model_url",
             "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip")!!

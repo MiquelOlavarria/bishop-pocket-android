@@ -339,9 +339,11 @@ class MainActivity : AppCompatActivity() {
         val etUrl = v.findViewById<EditText>(R.id.et_url)
         val etKey = v.findViewById<EditText>(R.id.et_key)
         val etSession = v.findViewById<EditText>(R.id.et_session)
+        val etFloor = v.findViewById<EditText>(R.id.et_floor)
         etUrl.setText(PocketConfig.apiUrl(this))
         etKey.setText(PocketConfig.apiKey(this))
         etSession.setText(PocketConfig.sessionId(this))
+        etFloor.setText(PocketConfig.voiceFloor(this).toString())
         AlertDialog.Builder(this)
             .setTitle("Ajustes")
             .setView(v)
@@ -349,6 +351,12 @@ class MainActivity : AppCompatActivity() {
                 PocketConfig.setApiUrl(this, etUrl.text.toString().trim())
                 PocketConfig.setApiKey(this, etKey.text.toString().trim())
                 PocketConfig.setSessionId(this, etSession.text.toString().trim())
+                val floor = etFloor.text.toString().trim().toFloatOrNull()
+                if (floor != null && floor in 0.005f..0.05f) {
+                    PocketConfig.setVoiceFloor(this, floor)
+                } else {
+                    Toast.makeText(this, "Sensibilidad no válida (0.005-0.05); se mantiene", Toast.LENGTH_LONG).show()
+                }
                 Toast.makeText(this, "Guardado", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("Cancelar", null)
