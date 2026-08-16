@@ -35,18 +35,22 @@ class PocketService : Service() {
         const val ACTION_STOP = "com.sqmnet.bishoppocket.STOP"
         const val ACTION_FORCE_SEND = "com.sqmnet.bishoppocket.FORCE_SEND"
         const val ACTION_INTERRUPT = "com.sqmnet.bishoppocket.INTERRUPT"
+        const val ACTION_MEDIA_KEY = "com.sqmnet.bishoppocket.MEDIA_KEY"
         const val EXTRA_EVENT = "event"
 
         const val SAMPLE_RATE = 16000
         const val CHUNK_SECONDS = 0.6f
 
         @Volatile
-        var currentRms = 0f
+        var currentRms = 0f        // nivel de entrada (0..1) para el VU meter de la UI
             private set
 
         @Volatile
         var state: State = State.OFF
             private set
+
+        @Volatile
+        var mediaSession: MediaSession? = null   // para el MediaKeyReceiver
     }
 
     enum class State { OFF, LISTENING, VERIFYING, PROCESSING }
@@ -56,8 +60,9 @@ class PocketService : Service() {
     private lateinit var tts: TtsEngine
     private lateinit var agent: AgentClient
     private var recorder: AudioRecord? = null
-    private var mediaSession: MediaSession? = null
     private var running = false
+    private var processing = false
+    private var listening = false
     private var silenceSince = 0L
     private var messageStarted = false
     private val noiseWindow = ArrayDeque<Float>()
@@ -87,6 +92,25 @@ class PocketService : Service() {
         }
         setupMediaSession()
     }
+    /** Mapeo de teclas del auricular (usado por el Callback y por MediaKeyReceiver). */
+    private fun handleMediaKey(code: Int) {
+        when (code) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_HEADSETHOOK -> {
+                fileLog("🔘 Central → toggle escucha")
+                if (running) stopListening(announce = true) else startListening()
+            }
+            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                fileLog("🔘 Siguiente → forzar envío")
+                forceSend()
+            }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                fileLog("🔘 Anterior → interrumpir y volver a escuchar")
+                interruptProcessing()
+            }
+        }
+    }
+
     /** Captura los botones del auricular BT (media keys) para controlar la escucha. */
     private fun setupMediaSession() {
         mediaSession = MediaSession(this, "bishop-pocket").apply {
@@ -94,21 +118,7 @@ class PocketService : Service() {
                 override fun onMediaButtonEvent(mediaButtonEvent: Intent): Boolean {
                     val key = mediaButtonEvent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
                     if (key.action != KeyEvent.ACTION_DOWN) return true
-                    when (key.keyCode) {
-                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-                        KeyEvent.KEYCODE_HEADSETHOOK -> {
-                            fileLog("🔘 Central → toggle escucha")
-                            if (running) stopListening(announce = true) else startListening()
-                        }
-                        KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                            fileLog("🔘 Siguiente → forzar envío")
-                            forceSend()
-                        }
-                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                            fileLog("🔘 Anterior → interrumpir y volver a escuchar")
-                            interruptProcessing()
-                        }
-                    }
+                    handleMediaKey(key.keyCode)
                     return true
                 }
 
@@ -178,6 +188,7 @@ class PocketService : Service() {
                 ACTION_STOP -> { stopListening(announce = true); stopSelf() }
                 ACTION_FORCE_SEND -> forceSend()
                 ACTION_INTERRUPT -> interruptProcessing()
+                ACTION_MEDIA_KEY -> handleMediaKey(intent.getIntExtra("key_code", -1))
                 else -> if (intent == null && !running) startListening()
             }
         } catch (e: Exception) {
