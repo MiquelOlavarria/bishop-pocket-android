@@ -15,6 +15,7 @@ import android.media.MediaRecorder
 import android.media.MediaPlayer
 import android.media.ToneGenerator
 import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -99,6 +100,16 @@ class PocketService : Service() {
         setupMediaSession()
     }
     /** Mapeo de teclas del auricular (usado por el Callback y por MediaKeyReceiver). */
+    private fun setPlayingState(playing: Boolean) {
+        try {
+            val ps = PlaybackState.Builder()
+                .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, 0L, 1.0f)
+                .build()
+            mediaSession?.setPlaybackState(ps)
+        } catch (e: Exception) {
+            Log.w(TAG, "setPlaybackState: ${e.message}")
+        }
+    }
     private fun handleMediaKey(code: Int) {
         when (code) {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
@@ -220,6 +231,8 @@ class PocketService : Service() {
         state = State.LISTENING
         agcGain = 1.0f
         pendingText = ""
+        mediaSession?.setActive(true)
+        setPlayingState(true)
         startSilencePlayer()
         fileLog("startListening: LISTENING (arrancando captura)")
         updateNotification("Escuchando…")
@@ -232,6 +245,7 @@ class PocketService : Service() {
         running = false
         saveLastWav()
         stopSilencePlayer()
+        setPlayingState(false)
         recorder?.release()
         recorder = null
         state = State.OFF
