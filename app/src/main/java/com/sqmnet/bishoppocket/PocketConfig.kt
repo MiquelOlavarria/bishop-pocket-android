@@ -31,6 +31,9 @@ object PocketConfig {
 
     fun voiceMargin(ctx: Context): Float = prefs(ctx).getFloat("voice_margin", 2.5f)
 
+    /** Aislamiento de voz: fuente VOICE_COMMUNICATION + NoiseSuppressor + AGC del sistema. */
+    fun voiceIsolation(ctx: Context): Boolean = prefs(ctx).getBoolean("voice_isolation", true)
+
     fun voskModelUrl(ctx: Context): String =
         prefs(ctx).getString("vosk_model_url",
             "https://alphacephei.com/vosk/models/vosk-model-small-es-0.42.zip")!!

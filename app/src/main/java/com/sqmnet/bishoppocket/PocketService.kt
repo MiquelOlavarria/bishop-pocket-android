@@ -11,8 +11,10 @@ import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.media.MediaPlayer
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import android.media.MediaRecorder
 import android.media.ToneGenerator
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -306,8 +308,12 @@ class PocketService : Service() {
         val bufSize = maxOf(minBuf * 2, chunk * 2)
         val buf = ShortArray(chunk)
         recorder = try {
+            val source = if (PocketConfig.voiceIsolation(this))
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION   // modo llamada: NS + AGC fuerte
+            else
+                MediaRecorder.AudioSource.VOICE_RECOGNITION
             AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
+                source, SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
                 bufSize
             )
@@ -323,6 +329,26 @@ class PocketService : Service() {
             return
         }
         fileLog("captureLoop: AudioRecord state=${recorder?.state} minBuf=$minBuf bufSize=$bufSize")
+        // Aislamiento de voz: NoiseSuppressor + AGC del sistema (si el dispositivo lo soporta)
+        try {
+            if (PocketConfig.voiceIsolation(this)) {
+                val session = recorder?.audioSessionId
+                if (session != null) {
+                    if (NoiseSuppressor.isAvailable()) {
+                        val ns = NoiseSuppressor.create(session)
+                        ns?.enabled = true
+                        fileLog("🔇 NoiseSuppressor activo")
+                    }
+                    if (AutomaticGainControl.isAvailable()) {
+                        val agc = AutomaticGainControl.create(session)
+                        agc?.enabled = true
+                        fileLog("📈 AGC del sistema activo")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "audiofx: ${e.message}")
+        }
         try {
             recorder?.startRecording()
             fileLog("captureLoop: AudioRecord OK, grabando (VOICE_RECOGNITION)")
