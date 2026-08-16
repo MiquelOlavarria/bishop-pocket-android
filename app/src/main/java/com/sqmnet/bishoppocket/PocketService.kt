@@ -589,11 +589,11 @@ class PocketService : Service() {
             mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
             afd.close()
             mp.isLooping = true
-            mp.setVolume(0f, 0f)
+            mp.setVolume(0.01f, 0.01f)
             mp.prepare()
             mp.start()
             silencePlayer = mp
-            fileLog("🎵 reproductor de silencio activo — media keys capturadas")
+            fileLog("🎵 reproductor de silencio OK (audio activo imperceptible)")
         } catch (e: Exception) {
             Log.w(TAG, "silence player: ${e.message}")
             fileLog("❌ silence player: ${e.message}")
