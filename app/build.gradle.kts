@@ -22,8 +22,8 @@ android {
         applicationId = "com.sqmnet.bishoppocket"
         minSdk = 26
         targetSdk = 34
-        versionCode = 24
-        versionName = "1.14"
+        versionCode = 25
+        versionName = "1.15"
     }
 
     buildTypes {

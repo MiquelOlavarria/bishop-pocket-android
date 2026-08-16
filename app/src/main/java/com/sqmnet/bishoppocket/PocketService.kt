@@ -87,18 +87,39 @@ class PocketService : Service() {
         }
         setupMediaSession()
     }
-
+    /** Captura los botones del auricular BT (media keys) para controlar la escucha. */
     private fun setupMediaSession() {
         mediaSession = MediaSession(this, "bishop-pocket").apply {
             setCallback(object : MediaSession.Callback() {
+                override fun onMediaButtonEvent(mediaButtonEvent: Intent): Boolean {
+                    val key = mediaButtonEvent.getParcelableExtra<KeyEvent>(Intent.EXTRA_KEY_EVENT) ?: return false
+                    if (key.action != KeyEvent.ACTION_DOWN) return true
+                    when (key.keyCode) {
+                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+                        KeyEvent.KEYCODE_HEADSETHOOK -> {
+                            fileLog("🔘 Central → toggle escucha")
+                            if (running) stopListening(announce = true) else startListening()
+                        }
+                        KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                            fileLog("🔘 Siguiente → forzar envío")
+                            forceSend()
+                        }
+                        KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                            fileLog("🔘 Anterior → interrumpir y volver a escuchar")
+                            interruptProcessing()
+                        }
+                    }
+                    return true
+                }
+
                 override fun onSkipToNext() {
-                    fileLog("Botón siguiente → interrumpir y volver a escuchar")
-                    interruptProcessing()
+                    fileLog("🔘 skip next → forzar envío")
+                    forceSend()
                 }
 
                 override fun onSkipToPrevious() {
-                    fileLog("Botón anterior → forzar envío")
-                    forceSend()
+                    fileLog("🔘 skip prev → interrumpir")
+                    interruptProcessing()
                 }
             })
             isActive = true
